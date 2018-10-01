@@ -1,2 +1,431 @@
-This is COVER, Richard Waters' portable (and venerable) coverage package
-for Common Lisp.  See cover-doc.txt for more information.
+;This is the September 15, 1991 version of
+;the on-line documentation for Richard Waters' test case coverage checker.
+
+The COVER system: Determining the Coverage of a Test Suite
+
+Richard C. Waters
+
+MIT AI Laboratory
+545 Technology Sq.
+Cambridge MA 02139 
+Dick@AI.MIT.EDU
+
+Mitsubishi Electric Research Laboratories
+201 Broadway
+Cambridge MA 02139
+Dick@MERL.COM
+
+The value of a suite of test cases depends critically on its
+coverage.  Ideally a suite should test every facet of the
+specification for a program and every facet of the algorithms used to
+implement the specification.  Unfortunately, there is no practical way
+to be sure that complete coverage has been achieved.  However,
+something should be done to assess the coverage of a test suite,
+because a test suite with poor coverage has little value.
+
+A traditional approximate method of assessing the coverage of a test
+suite is to check that every condition tested by the program is
+exercised.  For every predicate in the program, there should be at
+least one test case that causes the predicate to be true and one that
+causes it to be false.  Consider the function MY* below which uses a
+convoluted algorithm to compute the product of two numbers.
+
+(DEFUN MY* (X Y)
+  (LET ((SIGN 1))
+    (WHEN (MINUSP X)
+      (SETQ SIGN (- SIGN))
+      (SETQ X (- X)))
+    (WHEN (MINUSP Y)
+      (SETQ SIGN (- SIGN))
+      (SETQ Y (- X)))
+    (* SIGN X Y)))
+
+The function my* contains two predicates, (MINUSP X) and
+(MINUSP Y), which lead to four conditions: X is negative,
+X is not negative, Y is negative, and Y is not
+negative.  To be at all thorough, a test suite must contain tests
+exercising all four of these conditions.  For instance, any test suite
+that fails to exercise the condition where Y is negative will
+fail to detect the bug in the next to last line of the function.
+
+(As an example of the fact that covering all the conditions in a
+program does not guarantee that every facet of either the algorithm or
+the specification will be covered, consider the fact that the two test
+cases (MY* 2.1 3) and (MY* -1/2 -1/2) cover all four
+conditions.  However, they do not detect the bug on the next to last
+line and they do not detect the fact that MY* fails to work on
+complex numbers.)
+
+The COVER system determines which conditions tested by a program
+are exercised by a given test suite.  This is no substitute for
+thinking hard about the coverage of the test suite.  However, it
+provides a useful starting point and can indicate some areas where
+additional test cases should be devised.
+
+		       USER'S MANUAL FOR COVER
+
+The functions, macros, and variables that make up the COVER
+system are in a package called "COVER".  The six exported
+symbols are documented below.
+
+COVER:ANNOTATE t-or-nil
+
+Evaluating (COVER:ANNOTATE T) triggers the processing of
+function and macro definitions by the COVER system.  Each
+subsequent instance of DEFUN or DEFMACRO is altered by
+adding annotation that maintains information about the various
+conditions tested in the body.
+
+Evaluating (COVER:ANNOTATE NIL) stops the special processing of
+function and macro definitions.  Subsequent definitions are not
+annotated.  However, if a function or macro that is currently
+annotated is redefined, the new definition is annotated as well.
+
+The macro COVER:ANNOTATE should only be used as a top-level
+form.  When annotation is triggered, a warning message is printed, and
+T is returned.  Otherwise, NIL is returned.
+
+(COVER:ANNOTATE T) => t ; after printing:
+;;; Warning: Coverage annotation applied.
+
+
+COVER:FORGET-ALL
+
+This function, which always returns t, has the effect of removing all
+coverage annotation from every function and macro.  It is appropriate
+to do this before completely recompiling the system being tested or
+before switching to a different system to be tested.
+
+COVER:RESET
+
+Each condition tested by an annotated function and macro is associated
+with a flag that trips when the condition is exercised.  The function
+COVER:RESET resets all these flags, and returns T.  It is
+appropriate to do this before rerunning a test suite to reevaluate
+its coverage.
+
+COVER:REPORT &KEY FN OUT ALL
+
+This function displays the information maintained by COVER,
+returning no values.  FN must be the name of an annotated
+function or macro.  If FN is specified, a report is printed
+showing information about that function or macro only.  Otherwise,
+reports are printed about every annotated function and macro.
+
+OUT, which defaults to *STANDARD-OUTPUT*,
+must either be an output stream or the name of a file.  It specifies
+where the reports should be printed.
+
+If ALL, which defaults to NIL, is non-null then the
+reports printed contain information about every condition.  Otherwise,
+the reports are abbreviated to highlight key conditions that have not
+been exercised.
+
+COVER:*LINE-LIMIT* default value 75
+
+The output produced by COVER:REPORT is truncated to ensure that
+it is no wider than COVER:*LINE-LIMIT*.
+
+			      AN EXAMPLE
+
+Suppose that the function MY* has been annotated and that no other
+functions or macros have been annotated.  The following example
+illustrates the operation of COVER and the reports printed by
+COVER:REPORT.
+
+(setq cover:*line-limit* 43) => 43
+
+(cover:reset) => T
+
+(cover:report) => ; after printing:
+;- :REACH (DEFUN MY* (X Y))  <1>
+
+(my* 2 2) => 4
+
+(cover:report) => ; after printing:
+;+ :REACH (DEFUN MY* (X Y))  <1>
+; + :REACH (WHEN (MINUSP X) (SETQ S  <2>
+;  - :NON-NULL (MINUSP X)  <4>
+; + :REACH (WHEN (MINUSP Y) (SETQ S  <6>
+;  - :NON-NULL (MINUSP Y)  <8>
+
+(my* -2 2) => -4
+
+(cover:report) => ; after printing:
+;+ :REACH (DEFUN MY* (X Y))  <1>
+; + :REACH (WHEN (MINUSP Y) (SETQ S  <6>
+;  - :NON-NULL (MINUSP Y)  <8>
+
+(cover:report :all t) => ; after printing:
+;+ :REACH (DEFUN MY* (X Y))  <1>
+; + :REACH (WHEN (MINUSP X) (SETQ S  <2>
+;  + :NON-NULL (MINUSP X)  <4>
+;  + :NULL (MINUSP X)  <5>
+; + :REACH (WHEN (MINUSP Y) (SETQ S  <6>
+;  - :NON-NULL (MINUSP Y)  <8>
+;  + :NULL (MINUSP Y)  <9>
+
+Each line in a report contains three pieces of information about a
+point in a definition: +/- specifying that the point
+either has (+) or has not (-) been exercised, a message
+indicating the physical and logical placement of the point in the
+definition, and in angle brackets < >, an integer that is a
+unique identifier for the point.  Indentation is used to indicate that
+some points are subordinate to others in the sense that the
+subordinate points cannot be exercised without also exercising their
+superiors.  The order of the lines of the report is the same as the
+order of the points in the definition.
+
+Each message contains a label (e.g., :REACH, :NULL) and a
+piece of code.  There is a point labeled :REACH corresponding to
+each definition as a whole and each conditional form within each
+definition.  Subordinate points corresponding to the conditions a
+conditional form tests are grouped under the point corresponding to
+the form.  As discussed in detail in the next subsection, the messages
+for the subordinate points describe the situations in which the
+conditions are exercised.  Lines that would otherwise be too long to
+fit on one line have their messages truncated (e.g., points <2>
+and <6>).
+
+The first three reports are abbreviated based on two principles.
+First, if a point P and all of its subordinates have been exercised,
+then P and all of its subordinates are omitted from the report.
+This is done to focus the user's attention on the points that have not
+been exercised.
+
+Second, if a point P has not been exercised, then all of the points
+subordinate to it are omitted from the report.  This reflects the fact
+that it is not possible for any of these subordinate points to have
+been exercised and one cannot devise a test case that exercises any of
+the subordinate points without first figuring out how to exercise P.
+
+An additional complicating factor is that COVER operates in an
+incremental fashion and does not, in general, have full information
+about the subordinates of points that have not been exercised.  As a
+result, it is not always possible to present a complete report.
+However, one can have total confidence that if the report says that
+every point has been exercised, this statement is based on complete
+information.
+
+The first report in shows that none of the points
+within MY* has been exercised.  The second report displays most
+of the points in MY*, to set the context for the two points that
+have not been exercised.  The third report omits <2> and its
+subordinates, since they have all been exercised.  The fourth report
+shows a complete report corresponding to the third abbreviated report.
+
+COVER:FORGET &rest ids
+
+This function gives the user greater control over the reports produced
+by COVER:REPORT.  Each ID must be an integer identifying a point.  All
+information about the specified points (and their subordinates) is
+forgotten.  From the point of view of COVER:REPORT, the effect is as
+if the points never existed.  (A forgotten point can be retrieved by
+reevaluating or recompiling the function or macro definition
+containing it.)  The example below, which follows on after the end of
+the example above, shows the action of COVER:FORGET.
+
+(cover:forget 6) => T
+
+(cover:report :all t) => ; after printing:
+;+ :REACH (DEFUN MY* (X Y))  <1>
+; + :REACH (WHEN (MINUSP X) (SETQ S  <2>
+;  + :NON-NULL (MINUSP X)  <4>
+;  + :NULL (MINUSP X)  <5>
+
+(cover:report) =>  after printing
+;All points exercised.
+
+The abbreviated report above does not describe any points, because
+every point in MY* that has not been forgotten has been
+exercised.  It is appropriate to forget a point if there is some
+reason that no test case can possibly exercise the point.  However, it
+is much better to write your code so that every condition can be
+tested.
+
+(Point numbers are assigned based on the order in which points are
+entered into COVER's database.  In general, whenever a
+definition is reevaluated or recompiled, the numbers of the points
+within it change.)
+
+		 THE WAY CONDITIONALS ARE ANNOTATED
+
+<If the follwing is written in a file>
+
+(in-package "USER")
+
+(require "COVER" ...)
+
+(defmacro maybe+ (x y)
+  `(if (numberp ,x) (+ ,x ,y)))
+
+(cover:annotate t)
+
+(defmacro maybe- (x y)
+  `(if (numberp ,x) (- ,x ,y)))
+
+(defun g (x y)
+   (cond ((and (null x) y) y)
+         (y (case y
+              (1 (maybe- x y))
+              (2 (maybe+ x y))))))
+
+(cover:annotate nil)
+
+(defun h (x y) ...)
+
+(cover:reset)
+
+(run-tests)
+
+(cover:report :out "report" :all t)
+
+<loading the file produces the following output in the file "report">
+
+;+ :REACH (DEFMACRO MAYBE- (X Y))  <1>
+;+ :REACH (DEFUN G (X Y))  <2>
+; + :REACH (COND ((AND # Y) Y) (Y (  <3>
+;  + :REACH (AND (NULL X) Y)  <9>
+;   + :FIRST-NULL (NULL X)  <11>
+;   + :EVAL-ALL Y  <12>
+;  + :FIRST-NON-NULL (AND (NULL X)   <5>
+;  + :FIRST-NON-NULL Y  <7>
+;   + :REACH (CASE Y (1 (MAYBE- X Y  <13>
+;    + :SELECT 1  <15>
+;     + :REACH (IF (NUMBERP X) (- X  <18>
+;      + :NON-NULL (NUMBERP X)  <20>
+;      + :NULL (NUMBERP X)  <21>
+;    + :SELECT 2  <16>
+;    - :SELECT-NONE  <17>
+;  + :ALL-NULL  <8>
+
+The above shows a file that makes use of COVER and the kind of
+report that might be produced by loading the file.  Because,
+MAYBE- and G are the only definitions that have been annotated,
+these are the only definitions that are reported on.  The order of the
+reports is the same as the order in which the definitions were
+compiled.  The report on G indicates that the tests performed by
+RUN-TESTS exercise most of the conditions tested by G.
+However, they do not exercise the situation in which the CASE
+statement is reached, but neither of its clauses is selected.
+
+There are no points within MAYBE-, because the code for
+MAYBE- does not contain any conditional forms.  It is interesting to
+consider the precise points that COVER includes for G.
+
+When COVER processes a definition, a cluster of points is generated
+corresponding to each conditional form (i.e., IF, WHEN, UNTIL, COND,
+CASE, TYPECASE, AND, and OR) that is literally present in the program.
+In addition, points are generated corresponding to conditional forms
+that are produced by macros that are annotated (e.g., the IF produced
+by the MAYBE- in the first CASE clause in G). However, annotation is
+not applied to conditionals that come from other sources (e.g., from
+macros that are defined outside of the system being tested).  These
+conditionals are omitted, because there is no reasonable way for the
+user to know how they relate to the code, and therefore there is no
+reasonable way for the user to devise a test case that will exercise
+them.
+
+
+The messages associated with a point's subordinates describe the
+situations under which the subordinates are exercised.  The pattern of
+messages associated with CASE and TYPECASE is illustrated by the
+portion (reproduced below) of the report above that describes the CASE
+in G.
+
+;   + :REACH (CASE Y (1 (MAYBE- X Y  <13>
+;    + :SELECT 1  <15>
+;    + :SELECT 2  <16>
+;    - :SELECT-NONE  <17>
+
+There are two subpoints corresponding to the two clauses of the
+CASE.  In addition, since the last clause does not begin with
+T or OTHERWISE, there is an additional point corresponding to
+the situation where none of the clauses of the CASE are
+executed.
+
+The pattern of messages associated with a COND is illustrated by the
+portion of the report that describes the COND in G.
+
+; + :REACH (COND ((AND # Y) Y) (Y (  <3>
+;  + :REACH (AND (NULL X) Y)  <9>
+;  + :FIRST-NON-NULL (AND (NULL X)   <5>
+;  + :FIRST-NON-NULL Y  <7>
+;  + :ALL-NULL  <8>
+
+There are subordinate points corresponding to the two clauses and the
+situation where neither clause is executed.  There is also a point <9>
+corresponding to the AND that is the predicate of the first COND
+clause.  This point is placed directly under <3>, because it is not
+subordinate to any of the individual COND clauses.
+
+The treatment of AND (and OR) is particularly interesting.
+Sometimes AND is used as a control construct on a par with
+COND.  In that situation, it is clear that AND should be
+treated analogously to COND.  However, at other times, AND
+is used to compute a value that is tested by another conditional form.
+In that situation, COVER could choose to treat AND as a
+simple function.  However, it is nevertheless still reasonable to
+think of an AND as having conditional points that correspond to
+different reasons why the AND returns a true or false value.  It
+is wise to include tests corresponding to each of these different
+reasons.
+
+The pattern of messages associated with an AND is illustrated by the
+portion of the report that describes the AND in G.
+
+(cover:report :all t)
+;  + :REACH (AND (NULL X) Y)  <9>
+;   + :FIRST-NULL (NULL X)  <11>
+;   + :EVAL-ALL Y  <12>
+
+The final subpoint corresponds to the situation where all of the
+arguments of the AND have been evaluated.  The AND then
+returns whatever the final argument returned.
+
+The example in this section illustrates a batch-oriented use of COVER.
+However, COVER is most effectively used in an interactive way.  It is
+recommended that you first create as comprehensive a test suite as you
+can and capture it using a tool such as RT.  The tests should then be
+run in conjunction with COVER and repeated reports from COVER
+generated as additional tests are created until complete coverage of
+conditions has been achieved.  To robustly support this mode of
+operation, COVER has been carefully designed so that it will work with
+batch-compiled definitions, incrementally-compiled definitions, and
+interpreted definitions.
+
+			   OBTAINING COVER
+
+COVER is written in portable Common Lisp and has been tested in
+several different Common Lisp implementations.  The source for cover
+can be obtained over the INTERNET by using FTP.  Connection should be
+made to FTP.AI.MIT.EDU (INTERNET number 128.52.32.6).  Login as
+``anonymous'' and copy the files shown below.
+
+    In the directory /pub/lptrs/
+
+    cover.lisp        ; source code
+    cover-test.lisp   ; test suite
+    cover-doc.txt     ; brief documentation
+
+
+The code for COVER and the files above are copyright 1991 by the
+Massachusetts Institute of Technology, Cambridge MA.  Permission to
+use, copy, modify, and distribute this software for any purpose and
+without fee is hereby granted, provided that this copyright and
+permission notice appear in all copies and supporting documentation,
+and that the names of MIT and/or the author are not used in
+advertising or publicity pertaining to distribution of the software
+without specific, written prior permission.  MIT and the author make
+no representations about the suitability of this software for any
+purpose.  It is provided ``as is'' without express or implied
+warranty.
+
+MIT and the author disclaim all warranties with regard to this software,
+including all implied warranties of merchantability and fitness.  In no
+event shall MIT or the author be liable for any special, indirect or
+consequential damages or any damages whatsoever resulting from loss of use,
+data or profits, whether in an action of contract, negligence or other
+tortious action, arising out of or in connection with the use or
+performance of this software.
+
