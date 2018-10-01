@@ -101,8 +101,9 @@
 
 (defvar *line-limit* 75)
 
-(proclaim '(special *depth* *all*
-		    *out* *done*))
+(declaim (special *depth* *all*
+		  *out* *done*))
+(declaim (special *subs* *sup*))
 
 (cl:defun report
             (&key (fn nil)
@@ -240,8 +241,6 @@
     (c-when . when) (c-unless . unless)
     (c-cond . cond) (c-case . case)
     (c-typecase . typecase)))
-
-(proclaim '(special *subs* *sup*))
 
 (cl:defmacro sup-mac () nil)
 

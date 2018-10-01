@@ -13,6 +13,7 @@
 (asdf:defsystem "cover/tests"
   :author "Richard C. Waters"
   :description "Test suite for COVER"
+  :license "MIT"
   :depends-on ("cover" "uiop")
   :components ((:file "cover-test"))
   :perform (asdf:test-op (operation component)

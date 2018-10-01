@@ -481,7 +481,7 @@
 		  (T form)))
           (defun eval-non-atomic (form)
 	    "another test function"
-	    (declare (listp form))
+	    (declare (type list form))
 	    (case (car form)
 	      (+ (+ (eval-exp (cadr form)) (eval-exp (caddr form))))
 	      (* (* (eval-exp (cadr form)) (eval-exp (caddr form))))
