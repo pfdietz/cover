@@ -25,7 +25,7 @@
 
 (provide "COVER")
 
-(shadow '(defun defmacro))
+(shadow '(defun defmacro defmethod))
 
 (export '(annotate report reset forget
 	  forget-all *line-limit*))
@@ -38,11 +38,28 @@
   (name nil)
   (subs nil))
 
-(defvar *count* 0)
-(defvar *hit* 1)
-(defvar *points* nil)
-(defvar *annotating* nil)
-(defvar *testing* nil)
+;; (defvar *count* 0)
+;; (defvar *hit* 1)
+;; (defvar *points* nil)
+;; (defvar *annotating* nil)
+;; (defvar *testing* nil)
+
+;; Swallowed these globals into a single global state,
+;; for simplicity.  Replace their references with symbol macros.
+(defstruct cgs
+  (count 0 :type integer)
+  (hit 1 :type integer)
+  (points nil :type list)
+  (points-tail nil :type list) ;; last cons cell of POINTS, or NIL
+  (annotating nil)
+  (testing nil))
+
+(defvar *cgs* (make-cgs))
+(define-symbol-macro *count* (cgs-count *cgs*))
+(define-symbol-macro *hit* (cgs-hit *cgs*))
+(define-symbol-macro *points* (cgs-points *cgs*))
+(define-symbol-macro *annotating* (cgs-annotating *cgs*))
+(define-symbol-macro *testing* (cgs-testing *cgs*))
 
 (cl:defun forget (&rest ids)
   (forget1 ids *points*)
@@ -55,9 +72,9 @@
     (forget1 names (subs p))))
 
 (cl:defun forget-all ()
-  (setq *points* nil)
-  (setq *hit* 1)
-  (setq *count* 0)
+  (setf *points* nil
+	*hit* 1
+	*count* 0)
   t)
 
 (cl:defun reset () (incf *hit*) t)
@@ -65,7 +82,7 @@
 (cl:defun add-top-point (p)
   (setq p (copy-tree p))
   (let ((old (find (fn-name p) *points*
-		   :key #'fn-name)))
+		   :key #'fn-name :test #'equal)))
     (cond (old (setf (id p) (id old))
 	       (nsubstitute p old *points*))
 	  (t (setf (id p) (incf *count*))
@@ -74,12 +91,13 @@
 			  (list p)))))))
 
 (cl:defun record-hit (p)
-  (unless (= (hit p) *hit*)
-    (setf (hit p) *hit*)
-    (let ((old (locate (name p))))
-      (if old
-	  (setf (hit old) *hit*)
-	  (add-point p)))))
+  (let ((h *hit*))
+    (unless (= (hit p) h)
+      (setf (hit p) h)
+      (let ((old (locate (name p))))
+	(if old
+	    (setf (hit old) h)
+	    (add-point p))))))
 
 (cl:defun locate (name)
   (find name
@@ -186,7 +204,7 @@
 
 (cl:defun annotate1 (flag)
   (shadowing-import
-   (set-difference '(defun defmacro)
+   (set-difference '(defun defmacro defmethod)
      (package-shadowing-symbols *package*)))
   (when (and flag (not *testing*))
     (warn "Coverage annotation applied."))
@@ -197,6 +215,32 @@
 
 (cl:defmacro defmacro (n a &body b)
   (process 'defmacro 'cl:defmacro n a b))
+
+(cl:defmacro defmethod (n &rest method-body)
+  (let* ((method-qualifiers (loop while (not (listp (car method-body)))
+			       collect (pop method-body)))
+	 (specialized-lambda-list (pop method-body))
+	 (name (cons n (append method-qualifiers
+			       (name-part-from-specialized-lambda-list specialized-lambda-list))))
+	 )
+    ;; method-body now is docstrings + declarations + actual body
+    (process1 'defmethod 'cl:defmethod n name
+	      (append method-qualifiers (list specialized-lambda-list))
+	      method-body)))
+
+(cl:defun name-part-from-specialized-lambda-list (specl)
+  "List of the specializer parts from a specialized lambda list"
+  (loop for spec in specl
+     until (member spec lambda-list-keywords)
+     collect (typecase spec
+	       (symbol t)
+	       ((cons symbol (cons symbol null))
+		(cadr spec))
+	       ((cons symbol (cons class null))
+		(class-name (cadr spec)))
+	       ((cons symbol (cons (cons (eql 'eql) (cons t null)) null))
+		(cadr spec))
+	       (t (error "Invalid parameter specializer: ~A" spec)))))
 
 (cl:defun parse-body (body)
   (let ((decls nil))
@@ -217,21 +261,28 @@
     (typecase . c-typecase)))
 
 (cl:defun process (cdef def fn argl b)
+  (process1 cdef def fn fn (list argl) b))
+
+(cl:defun process1 (cdef def fn fn-extra argll b)
+  ;; FN is the bare function name
+  ;; FN-EXTRA is that name, plus (in the case of methods)
+  ;;   extra information to distinguish this method from
+  ;;   others (method qualifiers and method arg qualifiers)
   (if (not (or *annotating*
-	       (find fn 
+	       (find fn-extra
 		     *points*
 		     :key #'fn-name)))
-      `(,def ,fn ,argl ., b)
+      `(,def ,fn ,@argll ., b)
       (multiple-value-bind (decls b)
 	  (parse-body b)
 	(setq b (sublis *check* b))
 	(let ((name
 	       `((:reach
-		  (,cdef ,fn ,argl)))))
+		  (,cdef ,fn-extra ,.argll)))))
 	  `(eval-when (:compile-toplevel :load-toplevel :execute)
 	    (add-top-point
 	      ',(make-point :name name))
-	    (,def ,fn ,argl ,@ decls
+	    (,def ,fn ,@argll ,@ decls
 		  ,(c0 (make-point :name
 				   name)
 		        name b)))))))
