@@ -21,11 +21,15 @@
  |  WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER  TORTIOUS  ACTION,  |
  |  ARISING  OUT  OF  OR  IN  CONNECTION WITH THE USE OR PERFORMANCE OF THIS  |
  |  SOFTWARE.                                                                 |
- |----------------------------------------------------------------------------|#
+|----------------------------------------------------------------------------|#
+
+;;; Additional changes Copyright 2018 by Paul F. Dietz
+;;; Permission granted to use, copy, modify and distribute these changes
+;;; for any purpose, without restriction.
 
 (provide "COVER")
 
-(shadow '(defun defmacro defmethod))
+(shadow '(defun defmacro defmethod defgeneric))
 
 (export '(annotate report reset forget
 	  forget-all *line-limit*))
@@ -81,8 +85,7 @@
 
 (cl:defun add-top-point (p)
   (setq p (copy-tree p))
-  (let ((old (find (fn-name p) *points*
-		   :key #'fn-name :test #'equal)))
+  (let ((old (find-point (fn-name p))))
     (cond (old (setf (id p) (id old))
 	       (nsubstitute p old *points*))
 	  (t (setf (id p) (incf *count*))
@@ -106,6 +109,9 @@
             (let ((p (locate (cdr name))))
 	      (if p (subs p))))
 	:key #'name :test #'equal))
+
+(cl:defun find-point (fn)
+  (find fn *points* :key #'fn-name :test #'equal))
 
 (cl:defun add-point (p)
   (let ((sup (locate (cdr (name p)))))
@@ -138,8 +144,7 @@
        "~%No definitions annotated."))
     ((not fn)
      (report1 *points* all out))
-    ((setq p (find fn *points*
-		   :key #'fn-name))
+    ((setq p (find-point fn))
      (report1 (list p) all out))
     (t (format out "~%~A is not annotated."
 	       fn))))
@@ -204,7 +209,7 @@
 
 (cl:defun annotate1 (flag)
   (shadowing-import
-   (set-difference '(defun defmacro defmethod)
+   (set-difference '(defun defmacro defmethod defgeneric)
      (package-shadowing-symbols *package*)))
   (when (and flag (not *testing*))
     (warn "Coverage annotation applied."))
@@ -224,9 +229,47 @@
 			       (name-part-from-specialized-lambda-list specialized-lambda-list))))
 	 )
     ;; method-body now is docstrings + declarations + actual body
-    (process1 'defmethod 'cl:defmethod n name
+    (process1 'defmethod 'cl:defmethod (list n) name
 	      (append method-qualifiers (list specialized-lambda-list))
 	      method-body)))
+
+(cl:defmacro defgeneric (&whole whole n &rest defgeneric-body)
+  (flet ((%assert (p) (unless p (error "Not a valid defgeneric form: ~a" whole))))
+    (%assert (consp defgeneric-body))
+    (%assert (listp (car defgeneric-body)))
+    (%assert (null (cdr (last defgeneric-body))))
+    (let ((options-and-methods (cdr defgeneric-body)))
+      (%assert (every #'consp options-and-methods))
+      (let* ((point-forms nil)
+	     (processed-options-and-methods
+	      (loop for om in options-and-methods
+		 collect (if (eql (car om) :method)
+			     (multiple-value-bind (point-form def-form)
+				 (process-defgeneric-method n om)
+			       (push point-form point-forms)
+			       def-form)
+			     om))))
+	(if point-forms
+	    `(eval-when (:compile-toplevel :load-toplevel :execute)
+	       ,@(reverse point-forms)
+	       (cl:defgeneric ,n ,(car defgeneric-body)
+		 ,@processed-options-and-methods))
+	    `(cl:defgeneric ,n ,@defgeneric-body))))))
+
+(cl:defun process-defgeneric-method (n om)
+  "Process a :method option from a defgeneric form for function named N.
+   Returns the form for defining the point and the revised method description"
+  (assert (eql (pop om) :method))
+  (let* ((method-qualifiers (loop while (not (listp (car om)))
+			       collect (pop om)))
+	 (specialized-lambda-list (pop om))
+	 (name (cons n (append method-qualifiers
+			       (name-part-from-specialized-lambda-list specialized-lambda-list)))))
+    (if (not (or *annotating* (find-point name)))
+	(values nil om)
+	(process2 :method :method nil name
+		  (append method-qualifiers (list specialized-lambda-list))
+		  om))))
 
 (cl:defun name-part-from-specialized-lambda-list (specl)
   "List of the specializer parts from a specialized lambda list"
@@ -261,31 +304,34 @@
     (typecase . c-typecase)))
 
 (cl:defun process (cdef def fn argl b)
-  (process1 cdef def fn fn (list argl) b))
+  (process1 cdef def (list fn) fn (list argl) b))
 
-(cl:defun process1 (cdef def fn fn-extra argll b)
+(cl:defun process1 (cdef def fnl fn-extra argll b)
   ;; FN is the bare function name
   ;; FN-EXTRA is that name, plus (in the case of methods)
   ;;   extra information to distinguish this method from
   ;;   others (method qualifiers and method arg qualifiers)
-  (if (not (or *annotating*
-	       (find fn-extra
-		     *points*
-		     :key #'fn-name)))
-      `(,def ,fn ,@argll ., b)
-      (multiple-value-bind (decls b)
-	  (parse-body b)
-	(setq b (sublis *check* b))
-	(let ((name
-	       `((:reach
-		  (,cdef ,fn-extra ,.argll)))))
-	  `(eval-when (:compile-toplevel :load-toplevel :execute)
-	    (add-top-point
-	      ',(make-point :name name))
-	    (,def ,fn ,@argll ,@ decls
-		  ,(c0 (make-point :name
-				   name)
-		        name b)))))))
+  (if (not (or *annotating* (find-point fn-extra)))
+      `(,def ,@fnl ,@argll ., b)
+      (multiple-value-bind (point-form def-form)
+	  (process2 cdef def fnl fn-extra argll b)
+	`(eval-when (:compile-toplevel :load-toplevel :execute)
+	   ,point-form
+	   ,def-form))))
+
+(cl:defun process2 (cdef def fnl fn-extra argll b)
+  (multiple-value-bind (decls b)
+      (parse-body b)
+    (setq b (sublis *check* b))
+    (let ((name
+	   `((:reach
+	      (,cdef ,fn-extra ,.argll)))))
+      (values
+       `(add-top-point ',(make-point :name name))
+       `(,def ,@fnl ,@argll ,@ decls
+	      ,(c0 (make-point :name
+			       name)
+		   name b))))))
 
 (defvar *fix*
   '((c-or . or) (c-and . and) (c-if . if)
