@@ -42,26 +42,33 @@
   (name nil)
   (subs nil))
 
-;; (defvar *count* 0)
-;; (defvar *hit* 1)
-;; (defvar *points* nil)
-;; (defvar *annotating* nil)
-;; (defvar *testing* nil)
+;;; Data structure for the set of all points
+;;; head -> a cons cell before the actual list
+;;; tail -> the last cons cell in the points list, or head if empty
+;;; map -> an equal hash table from fn names of points
+;;;    to their cell in the points list
 
-;; Swallowed these globals into a single global state,
+(defstruct points-set
+  head
+  tail
+  map)
+
+;; Swallowed the globals into a single global state,
 ;; for simplicity.  Replace their references with symbol macros.
 (defstruct cgs
   (count 0 :type integer)
   (hit 1 :type integer)
-  (points nil :type list)
-  (points-tail nil :type list) ;; last cons cell of POINTS, or NIL
+  (points-head nil :type list)
+  (points-tail nil :type list)
+  (points-map (make-hash-table :test #'equal) :type hash-table)
   (annotating nil)
   (testing nil))
 
 (defvar *cgs* (make-cgs))
 (define-symbol-macro *count* (cgs-count *cgs*))
 (define-symbol-macro *hit* (cgs-hit *cgs*))
-(define-symbol-macro *points* (cgs-points *cgs*))
+;; (define-symbol-macro *points* (cgs-points *cgs*))
+(define-symbol-macro *points* (identity (cdr (cgs-points-head *cgs*))))
 (define-symbol-macro *annotating* (cgs-annotating *cgs*))
 (define-symbol-macro *testing* (cgs-testing *cgs*))
 
@@ -76,8 +83,12 @@
     (forget1 names (subs p))))
 
 (cl:defun forget-all ()
-  (setf *points* nil
-	*hit* 1
+  (let ((cgs *cgs*)
+	(head (list nil)))
+    (setf (cgs-points-head cgs) head
+	  (cgs-points-tail cgs) head)
+    (clrhash (cgs-points-map cgs)))
+  (setf *hit* 1
 	*count* 0)
   t)
 
@@ -85,13 +96,24 @@
 
 (cl:defun add-top-point (p)
   (setq p (copy-tree p))
-  (let ((old (find-point (fn-name p))))
-    (cond (old (setf (id p) (id old))
-	       (nsubstitute p old *points*))
+  (let* ((cgs *cgs*)
+	 (map (cgs-points-map cgs))
+	 (fn (fn-name p))
+	 (old-cell (gethash fn map)))
+    ;; Make sure the list is initialized
+    (unless (cgs-points-head cgs)
+      (let ((head (list nil)))
+	(setf (cgs-points-head cgs) head
+	      (cgs-points-tail cgs) head)))
+    (cond (old-cell
+	   (setf (id p) (id (car old-cell)))
+	   (setf (car old-cell) p))
 	  (t (setf (id p) (incf *count*))
-	     (setq *points*
-		   (nconc *points*
-			  (list p)))))))
+	     (let ((new-cell (list p)))
+	       (setf (gethash fn map) new-cell
+		     (cdr (cgs-points-tail cgs)) new-cell)
+	       (setf (cgs-points-tail cgs) new-cell))))
+    (cdr (cgs-points-head cgs))))
 
 (cl:defun record-hit (p)
   (let ((h *hit*))
@@ -111,7 +133,8 @@
 	:key #'name :test #'equal))
 
 (cl:defun find-point (fn)
-  (find fn *points* :key #'fn-name :test #'equal))
+  ;; (find fn *points* :key #'fn-name :test #'equal)
+  (car (gethash fn (cgs-points-map *cgs*))))
 
 (cl:defun add-point (p)
   (let ((sup (locate (cdr (name p)))))
