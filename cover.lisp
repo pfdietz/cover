@@ -1,6 +1,6 @@
 ;-*-syntax:COMMON-LISP; Mode: LISP-*-
 
-(in-package "COVER")
+(cl:in-package "COVER")
 
 #|----------------------------------------------------------------------------|
  | Copyright 1991 by the Massachusetts Institute of Technology, Cambridge MA. |
@@ -32,7 +32,7 @@
 (shadow '(defun defmacro defmethod defgeneric))
 
 (export '(annotate report reset forget
-	  forget-all *line-limit*))
+	  forget-all *line-limit* *report-readable-branches*))
 
 (defstruct (point (:conc-name nil)
 		  (:type list))
@@ -147,6 +147,9 @@
 	(setf (id p) (incf *count*))))))
 
 (defvar *line-limit* 75)
+(defvar *report-readable-branches* nil
+  "When true, causes COVER:REPORT to print the branch information readably.
+This can be annoying when the symbols are not in the current package.")
 
 (declaim (special *depth* *all*
 		  *out* *done*))
@@ -216,8 +219,11 @@
   (let* ((*print-pretty* nil)
 	 (*print-level* 3)
 	 (*print-length* nil)
+	 (ffn (if *report-readable-branches*
+		  (formatter ";~V@T~:[-~;+~]~{ ~S~}")
+		  (formatter ";~V@T~:[-~;+~]~{ ~A~}")))
 	 (m (format nil
-		    ";~V@T~:[-~;+~]~{ ~S~}"
+		    ffn
 		    *depth*
 		    (= (hit p) *hit*)
 		    (car (name p))))
@@ -230,13 +236,45 @@
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (annotate1 ,t-or-nil)))
 
+;;; We shadow IN-PACKAGE so these forms themselves
+;;; can instrument a package, rather than having to
+;;; add ANNOTATE forms to each Lisp file.
+
+(cl:defmacro in-package (name)
+  `(eval-when (:load-toplevel :compile-toplevel :execute)
+     (let ((package (cl:in-package ,name)))
+       (when *annotating*
+	 (do-shadowing-import package))
+       package)))
+
+;;; COVER permanently shadows certain defining macro symbols.
+;;; When *ANNOTATING* is false, these default back to the
+;;; standard behavior.  However, the symbols are still the
+;;; shadowed ones, not the originals.  IN-PACKAGE itself
+;;; becomes shadowed so that subsequence IN-PACKAGE forms
+;;; in a file can themselves instrument things.
+
 (cl:defun annotate1 (flag)
-  (shadowing-import
-   (set-difference '(defun defmacro defmethod defgeneric)
-     (package-shadowing-symbols *package*)))
+  (do-shadowing-import *package*)
   (when (and flag (not *testing*))
     (warn "Coverage annotation applied."))
   (setq *annotating* (not (null flag))))
+
+(cl:defun do-shadowing-import (package)
+  "Add the shadowed symbols provided by COVER to the indicated
+package."
+  (shadowing-import
+   (set-difference '(defun defmacro defmethod defgeneric in-package)
+     (package-shadowing-symbols package))
+   package))
+
+(cl:defun cover-compile-hook (thunk)
+  "Used in ASDF to enable coverage in a package being compiled"
+  (let ((*package* (find-package '#:cover))
+	(cgs (copy-cgs *cgs*)))
+    (setf (cgs-annotating cgs) t)
+    (let ((*cgs* cgs))
+      (funcall thunk))))
 
 (cl:defmacro defun (n argl &body b)
   (process 'defun 'cl:defun n argl b))
@@ -342,10 +380,17 @@
 	   ,point-form
 	   ,def-form))))
 
+(cl:defun instrument-forms (forms)
+  "Function that replaces various symbols with their instrumented
+versions.  This will be expanded later because some macros need
+to customize it.  For example, ITERATE depends on certain symbols
+being present and breaks if they are blindly replaced."
+  (sublis *check* forms))
+
 (cl:defun process2 (cdef def fnl fn-extra argll b)
   (multiple-value-bind (decls b)
       (parse-body b)
-    (setq b (sublis *check* b))
+    (setq b (instrument-forms b))
     (let ((name
 	   `((:reach
 	      (,cdef ,fn-extra ,.argll)))))
