@@ -33,6 +33,8 @@
 ;see R.C. Waters, "Supporting the Regression Testing of Lisp Programs",
 ;       ACM Lisp Pointers, 4(2):47--53, June 1991.
 
+; TODO: use a separate copy of RT instead of a copy here
+
 (defvar *test* nil "Current test name")
 (defvar *do-tests-when-defined* nil)
 (defvar *entries* '(nil) "Test database")
