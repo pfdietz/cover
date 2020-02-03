@@ -7,16 +7,20 @@
     :components
     ((:file "cover-package")
      (:file "cover" :depends-on ("cover-package")))
-    :in-order-to ((asdf:test-op (asdf:test-op "cover/tests"))))
+    :in-order-to ((asdf:test-op (asdf:test-op "cover-tests"))))
 
-    
-(asdf:defsystem "cover/tests"
+(asdf:defsystem "cover-rt"
+  :description "Copy of RT test system"
+  :components ((:file "cover-rt")))
+
+(asdf:defsystem "cover-tests"
   :author "Richard C. Waters"
   :description "Test suite for COVER"
   :license "MIT"
-  :depends-on ("cover" "uiop")
+  :depends-on ("cover" "uiop" "cover-rt")
   :components ((:file "cover-test"))
   :perform (asdf:test-op (operation component)
-			 (or (uiop:symbol-call '#:common-lisp-user '#:do-tests)
-			     (error "TEST-OP failed for COVER-TESTS"))))
+			 (let ((*package* (find-package "COVER-TEST")))
+			   (or (uiop:symbol-call '#:cover-rt '#:do-tests)
+			       (error "TEST-OP failed for COVER-TESTS")))))
   

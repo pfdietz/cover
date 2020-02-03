@@ -19,5 +19,6 @@ COVER-ITERATE, works on forms from ITERATE."
     :depends-on ("cover" "cover-iterate" "iterate" "uiop" "cover-rt" "cover-tests")
     :components ((:file "iterate-test"))
     :perform (asdf:test-op (operation components)
-			   (or (uiop:symbol-call '#:cover-iterate-test '#:do-tests)
-			       (error "TEST-OP failed for COVER-ITERATE-TEST"))))
+			   (let ((*package* (find-package :cover-iterate-test)))
+			     (or (uiop:symbol-call '#:cover-iterate-test '#:do-tests)
+				 (error "TEST-OP failed for COVER-ITERATE-TEST")))))

@@ -364,6 +364,8 @@ package."
     (cond . c-cond) (case . c-case)
     (typecase . c-typecase)))
 
+;; To add: ecase, ccase, etypecase, ctypecase
+
 (cl:defun process (cdef def fn argl b)
   (process1 cdef def (list fn) fn (list argl) b))
 

@@ -1,9 +1,9 @@
 (defpackage :cover/iterate
   (:use :cl :cover :iterate/internal)
-  (:import-from :cover :c-or :c-and :c-if :c-when
+  (:import-from :cover :c-cond :c-or :c-and :c-if :c-when
 		:c-unless :c-case :c-typecase)
   (:import-from :iterate/internal :walk :walk-cdr :walk-list-nconcing
-		:special-form? :return-code-modifying-body))
+		:special-form? :return-code-modifying-body :walk-arglist))
 
 (in-package :cover/iterate)
 

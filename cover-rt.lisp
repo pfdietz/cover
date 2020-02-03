@@ -1,6 +1,6 @@
 (defpackage :cover-rt
   (:use :cl)
-  (:export #:deftest #:rem-all-tests #:do-test #:do-tests))
+  (:export #:deftest #:rem-all-tests #:do-test #:do-tests #:test-file))
 
 (in-package :cover-rt)
 
