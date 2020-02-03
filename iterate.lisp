@@ -1,5 +1,5 @@
 (defpackage :cover/iterate
-  (:use :cl :cover :interate/internal)
+  (:use :cl :cover :iterate/internal)
   (:import-from :cover :c-or :c-and :c-if :c-when
 		:c-unless :c-case :c-typecase)
   (:import-from :iterate/internal :walk :walk-cdr :walk-list-nconcing
@@ -12,7 +12,7 @@
 (defmethod special-form? ((symbol (eql 'c-or)))
   '(c-or . walk-cdr))
 
-(defmethod special-form? ((symbol (eql 'c-and))
+(defmethod special-form? ((symbol (eql 'c-and)))
   '(c-and . walk-cdr))
 
 (defmethod special-form? ((symbol (eql 'c-if)))
