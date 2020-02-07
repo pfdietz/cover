@@ -1,11 +1,11 @@
-(defpackage :cover/iterate
-  (:use :cl :cover :iterate/internal)
+(defpackage :cover-iterate
+  (:use :cl :cover :iterate-internal)
   (:import-from :cover :c-cond :c-or :c-and :c-if :c-when
 		:c-unless :c-case :c-typecase)
-  (:import-from :iterate/internal :walk :walk-cdr :walk-list-nconcing
+  (:import-from :iterate-internal :walk :walk-cdr :walk-list-nconcing
 		:special-form? :return-code-modifying-body :walk-arglist))
 
-(in-package :cover/iterate)
+(in-package :cover-iterate)
 
 ;;; Extra methods to make COVER work with ITERATE
 
