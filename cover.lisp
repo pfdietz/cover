@@ -32,26 +32,8 @@
 (shadow '(defun defmacro defmethod defgeneric))
 
 (export '(annotate report reset forget
-	  forget-all *line-limit* *report-readable-branches*))
-
-(defstruct (point (:conc-name nil)
-		  (:type list))
-  (hit 0)
-  (id nil)
-  (status :show)
-  (name nil)
-  (subs nil))
-
-;;; Data structure for the set of all points
-;;; head -> a cons cell before the actual list
-;;; tail -> the last cons cell in the points list, or head if empty
-;;; map -> an equal hash table from fn names of points
-;;;    to their cell in the points list
-
-(defstruct points-set
-  head
-  tail
-  map)
+	  forget-all *line-limit* *report-readable-branches*
+          checkpoint-coverage restore-checkpointed-coverage))
 
 ;; Swallowed the globals into a single global state,
 ;; for simplicity.  Replace their references with symbol macros.
@@ -71,6 +53,29 @@
 (define-symbol-macro *points* (identity (cdr (cgs-points-head *cgs*))))
 (define-symbol-macro *annotating* (cgs-annotating *cgs*))
 (define-symbol-macro *testing* (cgs-testing *cgs*))
+
+(defstruct (point (:conc-name nil)
+		  (:type list))
+  ;; If HIT = *HIT* we've reached this point
+  (hit 0)
+  ;; Used to save HIT slot when checkpointing coverage state
+  (saved-hit (1- *hit*))
+  (id nil)
+  (status :show)
+  (name nil)
+  ;; Points below this in the expansion
+  (subs nil))
+
+;;; Data structure for the set of all points
+;;; head -> a cons cell before the actual list
+;;; tail -> the last cons cell in the points list, or head if empty
+;;; map -> an equal hash table from fn names of points
+;;;    to their cell in the points list
+
+(defstruct points-set
+  head
+  tail
+  map)
 
 (cl:defun forget (&rest ids)
   (forget1 ids *points*)
@@ -123,6 +128,18 @@
 	(if old
 	    (setf (hit old) h)
 	    (add-point p))))))
+
+(cl:defun map-points (fn)
+  "Apply FN to every point"
+  (labels ((m (p) (funcall fn p) (mapc #'m (subs p))))
+    (mapc #'m *points*)
+    nil))
+
+(cl:defun checkpoint-coverage ()
+  (map-points #'(lambda (p) (setf (saved-hit p) (hit p)))))
+
+(cl:defun restore-checkpointed-coverage ()
+  (map-points #'(lambda (p) (setf (hit p) (saved-hit p)))))
 
 (cl:defun locate (name)
   (find name
@@ -213,6 +230,7 @@ This can be annoying when the symbols are not in the current package.")
 		 (or (reportable s)
 		     (reportable-subs s)))
 	     (subs p))))
+
 (let ((fs (formatter ";~V@T~:[-~;+~]~{ ~S~}"))
       (fa (formatter ";~V@T~:[-~;+~]~{ ~A~}")))
   (cl:defun report3 (p)
