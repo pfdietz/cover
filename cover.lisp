@@ -213,24 +213,23 @@ This can be annoying when the symbols are not in the current package.")
 		 (or (reportable s)
 		     (reportable-subs s)))
 	     (subs p))))
-
-(cl:defun report3 (p)
-  (setq *done* nil)
-  (let* ((*print-pretty* nil)
-	 (*print-level* 3)
-	 (*print-length* nil)
-	 (ffn (if *report-readable-branches*
-		  (formatter ";~V@T~:[-~;+~]~{ ~S~}")
-		  (formatter ";~V@T~:[-~;+~]~{ ~A~}")))
-	 (m (format nil
-		    ffn
-		    *depth*
-		    (= (hit p) *hit*)
-		    (car (name p))))
-	 (limit (- *line-limit* 8)))
-    (when (> (length m) limit)
-      (setq m (subseq m 0 limit)))
-    (format *out* "~%~A  <~S>" m (id p))))
+(let ((fs (formatter ";~V@T~:[-~;+~]~{ ~S~}"))
+      (fa (formatter ";~V@T~:[-~;+~]~{ ~A~}")))
+  (cl:defun report3 (p)
+    (setq *done* nil)
+    (let* ((*print-pretty* nil)
+           (*print-level* 3)
+           (*print-length* nil)
+           (ffn (if *report-readable-branches* fs fa))
+           (m (format nil
+                      ffn
+                      *depth*
+                      (= (hit p) *hit*)
+                      (car (name p))))
+           (limit (- *line-limit* 8)))
+      (when (> (length m) limit)
+        (setq m (subseq m 0 limit)))
+      (format *out* "~%~A  <~S>" m (id p)))))
 
 (cl:defmacro annotate (t-or-nil)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
