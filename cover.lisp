@@ -33,7 +33,8 @@
 
 (export '(annotate report reset forget
 	  forget-all *line-limit* *report-readable-branches*
-          checkpoint-coverage restore-checkpointed-coverage))
+          checkpoint-coverage restore-checkpointed-coverage
+          count-covered-points with-coverage))
 
 ;; Swallowed the globals into a single global state,
 ;; for simplicity.  Replace their references with symbol macros.
@@ -53,6 +54,21 @@
 (define-symbol-macro *points* (identity (cdr (cgs-points-head *cgs*))))
 (define-symbol-macro *annotating* (cgs-annotating *cgs*))
 (define-symbol-macro *testing* (cgs-testing *cgs*))
+
+(cl:defmacro with-coverage (&body body)
+  "Set up an environment where cl:in-package forms are treated as cover:in-package forms"
+  `(let ((annotating *annotating*)
+         (mh *macroexpand-hook*))
+     (unwind-protect
+          (let ((*macroexpand-hook*
+                  (lambda (mfun mform env)
+                    (when (typep mform '(cons (eql cl:in-package) t))
+                      (setf mform (cons 'in-package (cdr mform))
+                            mfun (macro-function 'in-package)))
+                    (funcall mh mfun mform env))))
+            (setf *annotating* t)
+            ,@body)
+       (setf *annotating* annotating))))
 
 (defstruct (point (:conc-name nil)
 		  (:type list))
@@ -129,17 +145,31 @@
 	    (setf (hit old) h)
 	    (add-point p))))))
 
-(cl:defun map-points (fn)
+(cl:defun map-points (fn &optional fns)
   "Apply FN to every point"
-  (labels ((m (p) (funcall fn p) (mapc #'m (subs p))))
-    (mapc #'m *points*)
-    nil))
+  (when (typep fns '(and symbol (not null)))
+    (setf fns (list fns)))
+  (let ((points (if fns (mapcar #'find-point fns) *points*)))
+    (when (and fns (member nil points))
+      (warn "Names not annotated: ~a~%"
+            (remove-if #'find-point fns))
+      (setf points (remove nil points)))
+    (labels ((m (p) (funcall fn p) (mapc #'m (subs p))))
+      (mapc #'m points)
+      nil)))
 
-(cl:defun checkpoint-coverage ()
-  (map-points #'(lambda (p) (setf (saved-hit p) (hit p)))))
+(cl:defun checkpoint-coverage (&optional fns)
+  (map-points (lambda (p) (setf (saved-hit p) (hit p))) fns))
 
-(cl:defun restore-checkpointed-coverage ()
-  (map-points #'(lambda (p) (setf (hit p) (saved-hit p)))))
+(cl:defun restore-checkpointed-coverage (&optional fns)
+  (map-points (lambda (p) (setf (hit p) (saved-hit p))) fns))
+
+(cl:defun count-covered-points (&optional fns)
+  (let ((c 0)
+        (all 0)
+        (h *hit*))
+    (map-points (lambda (p) (incf all) (when (= (hit p) h) (incf c))) fns)
+    (values c all)))
 
 (cl:defun locate (name)
   (find name
@@ -259,7 +289,8 @@ This can be annoying when the symbols are not in the current package.")
 
 (cl:defmacro in-package (name)
   `(eval-when (:load-toplevel :compile-toplevel :execute)
-     (let ((package (cl:in-package ,name)))
+     (let ((package (find-package ',name)))
+       (setf *package* package)
        (when *annotating*
 	 (do-shadowing-import package))
        package)))
