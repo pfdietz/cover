@@ -390,7 +390,7 @@ package."
 		(cadr spec))
 	       ((cons symbol (cons class null))
 		(class-name (cadr spec)))
-	       ((cons symbol (cons (cons (eql 'eql) (cons t null)) null))
+	       ((cons symbol (cons (cons (eql eql) (cons t null)) null))
 		(cadr spec))
 	       (t (error "Invalid parameter specializer: ~A" spec)))))
 
